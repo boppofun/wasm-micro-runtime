@@ -97,6 +97,7 @@
 static struct {
     bool in_use;
     char* path;
+    os_dir_stream stream;
 } g_artificial_dirs[MAX_ARTICICIAL_DIRS];
 
 // Utility to know if a file descriptor (handle) should be treated
@@ -141,6 +142,8 @@ static void unregister_artificial_handle(os_file_handle handle){
         return;
     }
     free(g_artificial_dirs[i].path);
+    g_artificial_dirs[i].path = NULL;
+    g_artificial_dirs[i].stream = NULL;
     g_artificial_dirs[i].in_use = false;
 }
 
@@ -1106,7 +1109,14 @@ os_fdopendir(os_file_handle handle, os_dir_stream *dir_stream)
 {
     // Handle artificial handles
     if(is_artificial_handle(handle)){
-        *dir_stream = opendir(artificial_handle_to_path(handle));
+        os_dir_stream stream = opendir(artificial_handle_to_path(handle));
+        if(stream == NULL){
+            return convert_errno(errno);
+        }
+        // Save the stream handle in our array: this is necessary
+        // to clean it up once the closedir operation is called
+        g_artificial_dirs[handle - ARTIFICIAL_DIR_HANDLE_BASE].stream = stream;
+        *dir_stream = stream;
         return __WASI_ESUCCESS;
     }
 
@@ -1199,6 +1209,16 @@ os_readdir(os_dir_stream dir_stream, __wasi_dirent_t *entry,
 __wasi_errno_t
 os_closedir(os_dir_stream dir_stream)
 {
+    // dir_stream might have been created from an artificial handle
+    // In this case, we need to find the matching handle and unregister
+    // it to avoid leaks.
+    for(int i = 0; i < MAX_ARTICICIAL_DIRS; i++){
+        if(g_artificial_dirs[i].in_use && g_artificial_dirs[i].stream == dir_stream){
+            unregister_artificial_handle(i);
+            break;
+        }
+    }
+
     int ret = closedir(dir_stream);
 
     if (ret < 0)
