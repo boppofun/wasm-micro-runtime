@@ -279,6 +279,15 @@ __wasi_errno_t
 os_fstat(os_file_handle handle, struct __wasi_filestat_t *buf)
 {
     struct stat stat_buf;
+
+    // Handle artificial handles
+    if(is_artificial_handle(handle)){
+        int ret = stat(artificial_handle_to_path(handle),&stat_buf);
+        if (ret < 0)
+            return convert_errno(errno);
+        convert_stat(handle, &stat_buf, buf);
+        return __WASI_ESUCCESS;
+    }
     int ret = fstat(handle, &stat_buf);
 
     if (ret < 0)
@@ -302,13 +311,9 @@ os_fstatat(os_file_handle handle, const char *path,
         if(err != __WASI_ESUCCESS){
             return err;
         }
-        // Since we're on FAT here, there are no symlinks, so lstat is not required.
         int ret = stat(joined,&stat_buf);
         if (ret < 0)
             return convert_errno(errno);
-        // Handle is passed in the case it's in socket mode, which should never be the
-        // case for an artificial handle (folders only) so no changes are required
-        // in convert_stat
         convert_stat(handle, &stat_buf, buf);
         return __WASI_ESUCCESS;
     }
