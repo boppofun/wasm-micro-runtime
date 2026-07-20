@@ -498,7 +498,11 @@ os_openat(os_file_handle handle, const char *path, __wasi_oflags_t oflags,
     // Handle the case of handle being artificial
     if(is_artificial_handle(handle)){
         char joined[512];
-        join_artificial_path(handle, path, joined, 512);
+        __wasi_errno_t err = join_artificial_path(handle, path, joined, 512);
+
+        if(err != __WASI_ESUCCESS){
+            return err;
+        }
         // If O_DIRECTORY flag is set, use the open_preopen function
         // to handle it.
         if((open_flags & O_DIRECTORY) != 0){
