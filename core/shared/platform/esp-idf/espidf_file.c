@@ -405,6 +405,14 @@ os_file_set_fdflags(os_file_handle handle, __wasi_fdflags_t flags)
 __wasi_errno_t
 os_fdatasync(os_file_handle handle)
 {
+
+    // In case of an artificial handle:
+    // no sync needed.
+    // TODO : re-evaluate if not in read-only mode
+    if(is_artificial_handle(handle)){
+        return __WASI_ESUCCESS;
+    }
+
 #if CONFIG_HAS_FDATASYNC
     int ret = fdatasync(handle);
 #else
@@ -420,6 +428,13 @@ os_fdatasync(os_file_handle handle)
 __wasi_errno_t
 os_fsync(os_file_handle handle)
 {
+    // In case of an artificial handle:
+    // no sync needed.
+    // TODO : re-evaluate if not in read-only mode
+    if(is_artificial_handle(handle)){
+        return __WASI_ESUCCESS;
+    }
+
     int ret = fsync(handle);
 
     if (ret < 0)
@@ -593,6 +608,13 @@ __wasi_errno_t
 os_file_get_access_mode(os_file_handle handle,
                         wasi_libc_file_access_mode *access_mode)
 {
+    // handle artificial handles
+    // This assumes directories are always opened in read-only mode
+    // TODO : change if we need to open directories in write-mode
+    if(is_artificial_handle(handle)){
+        return WASI_LIBC_ACCESS_MODE_READ_ONLY;
+    }
+
     int ret = fcntl(handle, F_GETFL, 0);
 
     if (ret < 0)
@@ -945,6 +967,12 @@ __wasi_errno_t
 os_lseek(os_file_handle handle, __wasi_filedelta_t offset,
          __wasi_whence_t whence, __wasi_filesize_t *new_offset)
 {
+
+    // If artificial, this is a directory, it is not seekable
+    if(is_artificial_handle(handle)){
+        return __WASI_ESPIPE;
+    }
+
     int nwhence;
 
     switch (whence) {
@@ -1076,6 +1104,12 @@ os_convert_stderr_handle(os_raw_file_handle raw_stderr)
 __wasi_errno_t
 os_fdopendir(os_file_handle handle, os_dir_stream *dir_stream)
 {
+    // Handle artificial handles
+    if(is_artificial_handle(handle)){
+        *dir_stream = opendir(artificial_handle_to_path(handle));
+        return __WASI_ESUCCESS;
+    }
+
     *dir_stream = fdopendir(handle);
 
     if (*dir_stream == NULL)
