@@ -333,6 +333,12 @@ os_fstatat(os_file_handle handle, const char *path,
 __wasi_errno_t
 os_file_get_fdflags(os_file_handle handle, __wasi_fdflags_t *flags)
 {
+    // Handle artificial handles
+    // In case this is called on an articificila handle for a folder
+    if(is_artificial_handle(handle)){
+        *flags = 0;
+        return __WASI_ESUCCESS;
+    }
     int ret = fcntl(handle, F_GETFL);
 
     if (ret < 0)
@@ -614,6 +620,12 @@ os_close(os_file_handle handle, bool is_stdio)
 {
     if (is_stdio)
         return __WASI_ESUCCESS;
+
+    // Handle artificial handles
+    if(is_artificial_handle(handle)){
+        unregister_artificial_handle(handle);
+        return __WASI_ESUCCESS;
+    }
 
     int ret = close(handle);
 
