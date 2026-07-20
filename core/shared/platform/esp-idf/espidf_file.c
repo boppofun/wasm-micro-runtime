@@ -77,12 +77,12 @@
 // below file APIs.
 #define ARTIFICIAL_DIR_HANDLE_BASE (1 << 24)
 
-// When pre-opening directories, each parent directory is also
-// opened with a matching (artificial) file descriptor. This is
-// an upper bound to avoid exceeding the 8 bit (256) range.
-// This allows to open directories which paths are at most
-// 8 folders deep.
-#define MAX_ARTICICIAL_DIRS 16
+// Max number of open directories. This is kept low to avoid
+// requiring too much memory when allocating the array.
+// Note : When pre-opening directories, each parent directory is also
+// opened with a matching (artificial) file descriptor. Opening
+// deep directories might end up filling this up quickly.
+#define MAX_ARTICICIAL_DIRS 32
 
 // Reserve an array of handles. Each handle's index added to
 // ARTIFICIAL_DIR_FILE_DESCRIPTOR_BASE will give us the int for use
@@ -400,11 +400,33 @@ os_open_preopendir(const char *path, os_file_handle *out)
 
     int fd = open(path, O_RDONLY | O_DIRECTORY, 0);
 
-    if (fd < 0)
+    if(fd >= 0){
+        *out = fd;
+        return __WASI_ESUCCESS;
+    }
+
+    // If open failed, check if it is a directory:
+    // this might happen on FAT VFS because it does not
+    // support O_DIRECTORY at the moment.
+    int original_errno = errno;
+
+    struct stat st;
+    if(stat(path, &st) < 0){
         return convert_errno(errno);
+    }
 
-    *out = fd;
+    // Not a directory, return the original error
+    if(!S_ISDIR(st.st_mode)){
+        return convert_errno(original_errno);
+    }
 
+    os_file_handle handle = register_artificial_handle(path);
+
+    if(handle < 0){
+        return __WASI_ENFILE;
+    }
+
+    *out = handle;
     return __WASI_ESUCCESS;
 }
 
