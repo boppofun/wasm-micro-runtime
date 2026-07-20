@@ -5,6 +5,9 @@
 
 #include "platform_api_extension.h"
 #include "libc_errno.h"
+#include "platform_internal.h"
+#include "platform_wasi_types.h"
+#include <stdio.h>
 #include <unistd.h>
 
 #if !defined(__APPLE__) && !defined(ESP_PLATFORM)
@@ -65,6 +68,86 @@
 #ifndef STDERR_FILENO
 #define STDERR_FILENO 2
 #endif
+
+// Define a base for "artificial" file descriptors for folders
+// for FAT VFS that does not support O_DIRECTORY. Leaves
+// 24 bits for real file descriptors, and uses the remaining 8 for
+// directories to be opened as fds.
+// If a FD is above this base, it must be handled separately in
+// below file APIs.
+#define ARTIFICIAL_DIR_HANDLE_BASE (1 << 24)
+
+// When pre-opening directories, each parent directory is also
+// opened with a matching (artificial) file descriptor. This is
+// an upper bound to avoid exceeding the 8 bit (256) range.
+// This allows to open directories which paths are at most
+// 8 folders deep.
+#define MAX_ARTICICIAL_DIRS 16
+
+// Reserve an array of handles. Each handle's index added to
+// ARTIFICIAL_DIR_FILE_DESCRIPTOR_BASE will give us the int for use
+// in file-descriptor based APIs.
+// Since they can be freed by closing the folders in any order,
+// we're keeping a boolean to know if any index is overridable
+static struct {
+    bool in_use;
+    char* path;
+} g_artificial_dirs[MAX_ARTICICIAL_DIRS];
+
+// Utility to know if a file descriptor (handle) should be treated
+// as native (O_DIRECTORY) or artificial (without O_DIRECTORY)
+static bool is_artificial_handle(os_file_handle handle){
+    return handle >= ARTIFICIAL_DIR_HANDLE_BASE;
+}
+
+// Registers a new artificial directory handle at the first free
+// space in the g_artificial_dirs array, in order to associate
+// its new file descriptor with its path which will be required
+// down the line.
+static os_file_handle register_artificial_handle(const char* path){
+    // Save the folder's path in the first free slot in the array
+    for(int i = 0; i < MAX_ARTICICIAL_DIRS; i++){
+        if(!g_artificial_dirs[i].in_use){
+            char* dup = strdup(path);
+            // if allocation failed
+            if (!dup){
+                return -1;
+            }
+            g_artificial_dirs[i].in_use = true;
+            g_artificial_dirs[i].path = dup;
+            return ARTIFICIAL_DIR_HANDLE_BASE + i;
+        }
+    }
+    // We've reached the limit of MAX_ARTIFICIAL_DIRS.
+    // treat this as an error
+    return -1;
+}
+
+// Const utility to get the path of a given artificial handle
+static const char* artificial_handle_to_path(os_file_handle handle){
+    return g_artificial_dirs[handle - ARTIFICIAL_DIR_HANDLE_BASE].path;
+}
+
+// Free an artificial handle in the association array. This is
+// meant to be used when closing a directory.
+static void unregister_artificial_handle(os_file_handle handle){
+    int i = handle - ARTIFICIAL_DIR_HANDLE_BASE;
+    if(i < 0){
+        return;
+    }
+    free(g_artificial_dirs[i].path);
+    g_artificial_dirs[i].in_use = false;
+}
+
+// Joins an artificial handle's path to a relative path given
+// as an argument.
+static __wasi_errno_t join_artificial_path(os_file_handle handle, const char* relative_path, char* out_buffer, size_t buffer_size){
+    int size = snprintf(out_buffer, buffer_size, "%s/%s", artificial_handle_to_path(handle), relative_path);
+    if(size < 0 || size >= buffer_size){
+        return __WASI_ENAMETOOLONG;
+    }
+    return __WASI_ESUCCESS;
+}
 
 // Converts a POSIX timespec to a WASI timestamp.
 static __wasi_timestamp_t
