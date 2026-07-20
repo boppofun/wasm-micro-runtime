@@ -85,6 +85,10 @@
 // deep directories might end up filling this up quickly.
 #define MAX_ARTICICIAL_DIRS 32
 
+// Max length of combined paths when used in WASM.
+// This allows avoiding heap allocation.
+#define MAX_PATH_LENGTH 512
+
 // Reserve an array of handles. Each handle's index added to
 // ARTIFICIAL_DIR_FILE_DESCRIPTOR_BASE will give us the int for use
 // in file-descriptor based APIs.
@@ -497,8 +501,8 @@ os_openat(os_file_handle handle, const char *path, __wasi_oflags_t oflags,
 
     // Handle the case of handle being artificial
     if(is_artificial_handle(handle)){
-        char joined[512];
-        __wasi_errno_t err = join_artificial_path(handle, path, joined, 512);
+        char joined[MAX_PATH_LENGTH];
+        __wasi_errno_t err = join_artificial_path(handle, path, joined, MAX_PATH_LENGTH);
 
         if(err != __WASI_ESUCCESS){
             return err;
