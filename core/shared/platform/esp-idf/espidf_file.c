@@ -1249,6 +1249,12 @@ os_is_handle_valid(os_file_handle *handle)
     return *handle > -1;
 }
 
+bool
+os_compare_file_handle(os_file_handle handle1, os_file_handle handle2)
+{
+    return handle1 == handle2;
+}
+
 char *
 os_realpath(const char *path, char *resolved_path)
 {
