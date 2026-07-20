@@ -8,6 +8,7 @@
 #include "platform_internal.h"
 #include "platform_wasi_types.h"
 #include <stdio.h>
+#include <sys/_default_fcntl.h>
 #include <unistd.h>
 
 #if !defined(__APPLE__) && !defined(ESP_PLATFORM)
@@ -492,6 +493,24 @@ os_openat(os_file_handle handle, const char *path, __wasi_oflags_t oflags,
             break;
         default:
             return __WASI_EINVAL;
+    }
+
+    // Handle the case of handle being artificial
+    if(is_artificial_handle(handle)){
+        char joined[512];
+        join_artificial_path(handle, path, joined, 512);
+        // If O_DIRECTORY flag is set, use the open_preopen function
+        // to handle it.
+        if((open_flags & O_DIRECTORY) != 0){
+            return os_open_preopendir(joined, out);
+        }
+        // Open as regular file in opened directory
+        int fd = open(joined,open_flags,0);
+        if(fd < 0){
+            return convert_errno(errno);
+        }
+        *out = fd;
+        return __WASI_ESUCCESS;
     }
 
     int fd = openat(handle, path, open_flags, 0666);
